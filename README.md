@@ -25,5 +25,7 @@ Get simpler graphs where box-membership edges are often omitted for roles (see t
      - `arg1` `bm` edges are kept, but removed for its role if `arg1` has only that `bm` edge what its role has. 
      - `a1` further develops `arg1` and also omits the `bm` edge for arg2 it the latter has `bm` edge for the same box as arg1 and teh role.
      - 
-### Requirements Python 3 
+### Requirements 
+
+Python 3 
 
