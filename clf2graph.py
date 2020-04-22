@@ -185,9 +185,10 @@ def read_clfs(clf_file):
 #################################
 def ordered_dict(id, raw, graph):
     '''Make a dictionary that will be dumped as json'''
-    timestamp = datetime.now().strftime('%Y-%m-%d (%H:%M)')
-    item = [('id', id), ('flavor', 2), ('framework', 'pmb'),
-            ('version', '3.0.0'), ('time', timestamp),
+    timestamp = datetime.now().strftime('%Y-%m-%d')
+    item = [('id', id), ('flavor', 2), ('framework', 'drg'),
+            ('version', '1.0'), ('time', timestamp),
+            ('provenance', "PMB (3.0.0); DRS2Graph (16fc614)"),
             ('input', raw), ('tops', graph[2]),
             ('nodes', graph[0]), ('edges', graph[1])
            ]
@@ -323,6 +324,11 @@ def add_edges(edges, eds):
         edges.append({'source': s, 'target': t, 'label': l})
 
 #################################
+def iter_subseteq_iter(iter1, iter2):
+    ''' '''
+    return set(iter1) <= set(iter2)
+
+#################################
 def add_nodes(nodes, nds):
     ''' '''
     for nd in nds:
@@ -406,13 +412,12 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, pars={}):
         if len(c) == 2 and pars['pmb2']:
             assert op in ['NOT', 'POS', 'NEC'], "Unknown condition {} in pmb2 mode".format(c)
             add_edges(edges, [ (nid[b], op, nid[x]) ])
-        elif op in ['IMP', 'DUP', 'DIS'] and pars['pmb2']: # DIS p51/d2927 p25/d1536 p87/d2746
-            add_nodes(nodes, [ ('rb', next_id) ]) # x and y boxes will be added by other box2graph
-            add_edges(edges, [ (nid[b], next_id, op), (next_id, nid[x], 'ARG1'), (next_id, nid[y], 'ARG2') ])
-            next_id += 1
+        elif op in ['IMP', 'DUP'] and pars['pmb2'] or op == 'DIS': # DIS p51/d2927 p25/d1536 p87/d2746
+            # b --op1--> x --op2--> y
+            add_edges(edges, [ (nid[b], nid[x], op + '1'), (nid[x], nid[y], op + '2') ])
         elif op in ['PRP'] and pars['pmb2']:
-            add_edges(edges, [ (nid[b], next_id, op), (next_id, nid[x], 'ARG1'), (next_id, nid[y], 'ARG2') ])
-            next_id += 1
+            # b --in--> x --PRP--> y
+            add_edges(edges, [ (nid[b], nid[x], 'in'), (nid[x], nid[y], 'PRP') ])
         # pmb3 and pmb2 version
         elif c in concept_conds: # LEX case
             assert arg_typing[y] == 'x', "Concept is not applied to a referent: {}".format(c)
@@ -423,7 +428,8 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, pars={}):
                 add_edges(edges, [ (nid[b], nid[y], label if pars['ce'] else 'in') ])
         elif op[0].isupper():
             # sanity check: covers roles like "PartOf" and EQU
-            assert op[0:2].istitle() or op.isupper(), "Suspicious role: {}".format(c)
+            assert iter_subseteq_iter([arg_typing[i] for i in (x,y)], "xc")\
+                   and (op[0:2].istitle() or op.isupper()), "Suspicious role: {}".format(c)
             add_role(nodes, edges, (b,) + c, nid, next_id, pars=pars)
             next_id += 1
         else:
@@ -439,7 +445,7 @@ def process_vars_constants(arg_typing):
     t2id = { v: i for i, v in enumerate(terms) }
     # for constants already introduce labeled nodes
     const = set([a for a in terms if arg_typing[a] in 'c'])
-    nodes = [ {'id':t2id[c], 'type':'c', 'label':remove_quotes(c)} for c in const ]
+    nodes = [ {'id':t2id[c], 'type':'c', 'label':c} for c in const ]
     # replace referents and boxes with IDs in all box_dict
     return nodes, t2id
 
