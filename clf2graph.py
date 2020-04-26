@@ -324,20 +324,25 @@ def clean_set(multi_list):
 
 #################################
 def add_edges(edges, eds):
-    ''' '''
+    '''Add tuple edges wrapped appropriately
+    '''
     for ed in eds:
-        (s, t, l) = ed
+        (s, t, l) = ed if len(ed) == 3 else (ed + (None,))
         assert isinstance(s, int) and isinstance(t, int), "Edge node IDs are integer"
-        edges.append({'source': s, 'target': t, 'label': l})
+        e = {'source': s, 'target': t}
+        if l: e['label'] = l
+        edges.append(e)
 
 #################################
 def iter_subseteq_iter(iter1, iter2):
-    ''' '''
+    '''Iterator1 is subset or equal to iterator2 from a set perspective
+    '''
     return set(iter1) <= set(iter2)
 
 #################################
 def add_nodes(nodes, nds):
-    ''' '''
+    '''Add tuple nodes wrapped appropriately
+    '''
     for nd in nds:
         (type, node_id, label) = nd if len(nd) == 3 else (nd + (None,))
         assert isinstance(node_id, int), "Node ID is integer"
@@ -368,7 +373,8 @@ def add_role(nodes, edges, cl, nid, role_id, pars={}):
 
 #################################
 def clf2graph(clf, alignment, signature=None, pars={}):
-    '''Convert a CLF and alignments into a DRG graph'''
+    '''Convert a CLF and alignments into a DRG graph
+    '''
     # TODO implement -bm features
     # parse clf and check on correctness
     (box_dict, top_boxes, disc_rels, presupp_rels, cl_types, arg_typing) =\
@@ -447,7 +453,8 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, pars={}):
 
 #################################
 def process_vars_constants(arg_typing):
-    '''    '''
+    '''Get nodes for constants and a mapping from terms to IDs
+    '''
     # Assign IDs to terms while preserving grouping IDs based on term types
     terms = sorted([a for a in arg_typing
                     if arg_typing[a] in 'bxc' and not re.match('"[avnr]\.\d\d"$', a)])
