@@ -421,7 +421,9 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, pars={}):
             add_edges(edges, [ (nid[b], op, nid[x]) ])
         elif op in ['IMP', 'DUP'] and pars['pmb2'] or op == 'DIS': # DIS p51/d2927 p25/d1536 p87/d2746
             # b --op1--> x --op2--> y
-            add_edges(edges, [ (nid[b], nid[x], op + '1'), (nid[x], nid[y], op + '2') ])
+            # add_edges(edges, [ (nid[b], nid[x], op + '1'), (nid[x], nid[y], op + '2') ])
+            # b --op--> x --op--> y
+            add_edges(edges, [ (nid[b], nid[x], op), (nid[x], nid[y], op) ])
         elif op in ['PRP'] and pars['pmb2']:
             # b --in--> x --PRP--> y
             add_edges(edges, [ (nid[b], nid[x], 'in'), (nid[x], nid[y], 'PRP') ])
