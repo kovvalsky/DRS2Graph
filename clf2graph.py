@@ -102,6 +102,9 @@ def parse_arguments():
     '-v', dest="verbose", default=1, type=int, choices=[0, 1, 2], metavar="LEVEL",
         help="Verbosity of logging: warning(0), info(1), debug(2)")
     parser.add_argument(
+    '--prov', default="PMB (3.0.0)",
+        help="Provenance of the generated output")
+    parser.add_argument(
     '--sig', default = '',
         help='If added, this contains a file with all allowed roles\
               otherwise a simple signature is used that\
@@ -139,20 +142,24 @@ def read_clfs(clf_file):
        a list of clauses (i.e. tuples) and a list of (token, (start_offset, end_offset))
     '''
     info("reading " + clf_file)
-    list_of_clf_aligns = []
+    list_of_pd_clf_aligns = []
     clf, alignment = [], []
     # read CLFs where an empty line is a delimiter of CLFs
     with open(clf_file) as CLFS:
         for line in CLFS:
-            # ignore commnet lines
-            if line.strip().startswith("%"): continue
+            # ignore commnet lines unless it contains pXX/dXXXX document ID
+            if line.strip().startswith("%"):
+                m = re.search('/(p\d{2}/d\d{4})/', line)
+                if m:
+                    pd = m.group(1)
+                continue
             # empty line means an end of the running CLF
             if not line.strip():
                 if clf:
                     assert len(clf) == len(alignment),\
                         "#clauses ({}) is the same as #alignments ({})".format(\
                         len(clf), len(alignment))
-                    list_of_clf_aligns.append((clf, alignment))
+                    list_of_pd_clf_aligns.append((pd, clf, alignment))
                     clf, alignment = [], []
                 continue
             # get a clause and a token alignment
@@ -178,17 +185,17 @@ def read_clfs(clf_file):
                 warning('ill-formed clause: {}'.format(clause))
     # add the last clf which has no empty following it
     if clf:
-        list_of_clf_aligns.append((clf, alignment))
-    info("{} clfs read".format(len(list_of_clf_aligns)))
-    return list_of_clf_aligns
+        list_of_pd_clf_aligns.append((pd, clf, alignment))
+    info("{} clfs read".format(len(list_of_pd_clf_aligns)))
+    return list_of_pd_clf_aligns
 
 #################################
-def ordered_dict(id, raw, graph):
+def wrap_up(id, raw, graph, prov):
     '''Make a dictionary that will be dumped as json'''
     timestamp = datetime.now().strftime('%Y-%m-%d')
     item = [('id', id), ('flavor', 2), ('framework', 'drg'),
             ('version', '1.0'), ('time', timestamp),
-            ('provenance', "PMB (3.0.0); DRS2Graph (16fc614)"),
+            ('provenance', prov),
             ('input', raw), ('tops', graph[2]),
             ('nodes', graph[0]), ('edges', graph[1])
            ]
@@ -489,7 +496,7 @@ def extract_splits_of_graphs(\
                     raw_file = op.join(parts_dir, p, d, lang+'.raw')
                     if op.isfile(clf_file) and op.isfile(raw_file):
                         # only one clf is expected in a file under data
-                        clf, align = read_clfs(clf_file)[0]
+                        pd, clf, align = read_clfs(clf_file)[0]
                         with open(raw_file) as RAW:
                             raw = RAW.read().rstrip() # trailing white space only
                         if with_align: # check alignments if they are present
@@ -501,7 +508,7 @@ def extract_splits_of_graphs(\
                             error_counter.append((p, d, sys.exc_info()[0]))
                             if throw_error: raise
                             continue
-                        dict_drg = ordered_dict('{}/{}'.format(p, d[1:]), raw, graph)
+                        dict_drg = wrap_up('p{}/d{}'.format(p, d[1:]), raw, graph, con_pars['prov'])
                         SPLIT.write(json.dumps(dict_drg) + '\n')
                     else:
                         warning("one of the files doesn't exist: {}, {}".format(clf_file, raw_file))
@@ -515,7 +522,8 @@ if __name__ == '__main__':
     sig = clfref.get_signature(args.sig)
     # conversion parameters
     con_pars = {'pmb2':args.pmb2, 'keep-refs':args.keep_refs, 'ce':args.ce,
-                'bm':args.bm, 'noarg':args.noarg, 'rmid':args.rmid, 'rle':args.rle }
+                'bm':args.bm, 'noarg':args.noarg, 'rmid':args.rmid, 'rle':args.rle,
+                'prov':args.prov }
     # the directory I/O mode
     if all([args.lang, args.out_dir, args.data_dir]):
         if not op.exists(args.out_dir):
@@ -525,16 +533,16 @@ if __name__ == '__main__':
                             con_pars=con_pars, error=args.error)
     # the file I/O mode
     else:
-        list_of_clf_align = read_clfs(args.input)
+        list_of_pd_clf_align = read_clfs(args.input)
         with open(args.raw) as r:
             list_of_raw = [ i for i in r.read().split(args.raw_sep) ]
             # if separator is trailing then discard the trailing empty raw
             if not list_of_raw[-1]: list_of_raw.pop()
-        assert len(list_of_clf_align) == len(list_of_raw), "Equal number of clfs and raws"
+        assert len(list_of_pd_clf_align) == len(list_of_raw), "Equal number of clfs and raws"
         error_counter = []
         with open(args.output, 'w') as OUT:
-            num = len(list_of_clf_align) - 1
-            for i, (clf, align) in enumerate(list_of_clf_align):
+            num = len(list_of_pd_clf_align) - 1
+            for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
                 if args.ids and str(i) not in args.ids: continue
                 raw = list_of_raw[i]
                 if args.with_align:
@@ -542,11 +550,11 @@ if __name__ == '__main__':
                 try:
                     graph = clf2graph(clf, align, signature=sig, pars=con_pars)
                 except:
-                    error("ID {}: {}\n{}".format(i, raw, sys.exc_info()))
+                    error("ID {}: {}\n{}".format(pd, raw, sys.exc_info()))
                     error_counter.append((i, sys.exc_info()[0]))
                     if args.throw_error: raise
                     continue
-                dict_drg = ordered_dict(str(i), raw, graph)
+                dict_drg = wrap_up(pd, raw, graph, args.prov)
                 OUT.write(json.dumps(dict_drg) + ('\n' if i < num else ''))
     # print erros if any:
     print("Done.")
