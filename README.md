@@ -6,8 +6,8 @@ The repository contains scripts that help to convert Discourse Representation St
 An example of converting `dev.txt` into `dev.bmall.mrp`, treating role and concept DRS conditions as labeled nodes, labeling role argument edges with `ARG1` and `ARG2`, and explicitly asserting box memberships for all discourse referents and reified roles (`-bm all`):
 
 ```
-./clf2graph.py --input pmb-gold-split/clf/dev.txt --raw pmb-gold-split/clf/dev.txt.raw --output pmb-gold-split/mrp/dev.bmall.mrp --sig clf_signature.yaml # -bm all parameter is by default 
-``` 
+./clf2graph.py --input pmb-gold-split/clf/dev.txt --raw pmb-gold-split/clf/dev.txt.raw --output pmb-gold-split/mrp/dev.bmall.mrp --sig clf_signature.yaml # -bm all parameter is by default
+```
 
 Get simpler graphs where box-membership edges are often omitted for roles (see the definition of the parameters below):
 ```
@@ -19,13 +19,12 @@ Get simpler graphs where box-membership edges are often omitted for roles (see t
    - `-rle` treat roles as unlabeled nodes with ingoing labelled edges, otherwise as labelled nodes (default)  
    - `-rmid` place roles between their arguments, otherwise as a parent of its arguments (default)  
    - `-noarg` don't place `ARGn` labelled or argument edges, otherwise place them (default)  
-   - `-bm [all arg1 role a1]` box membership (`bm`) representation modes: 
-     - `all` `bm` edges are present; 
+   - `-bm [all arg1 role a1]` box membership (`bm`) representation modes:
+     - `all` `bm` edges are present;
      - `bm` edges are kept for `role`s but omitted for role arguments if both arguments (excepy constants) have the same membership as their role;
-     - `arg1` `bm` edges are kept, but removed for its role if `arg1` has only that `bm` edge what its role has. 
-     - `a1` further develops `arg1` and also omits the `bm` edge for arg2 it the latter has `bm` edge for the same box as arg1 and teh role.
-     - 
-### Requirements 
+     - `arg1` `bm` edges are kept, but removed for its role if `arg1` has only that `bm` edge what its role has.
+     - `a1` further develops `arg1` and also omits the `bm` edge for arg2 if the latter has `bm` edge for the same box as arg1 and teh role.
+     -
+### Requirements
 
-Python 3 
-
+Python 3

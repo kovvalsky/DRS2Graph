@@ -146,7 +146,8 @@ def read_clfs(clf_file):
     clf, alignment = [], []
     # read CLFs where an empty line is a delimiter of CLFs
     with open(clf_file) as CLFS:
-        for line in CLFS:
+        for i, line in enumerate(CLFS, start=1):
+            #print("{}:\t{}".format(i, line))
             # ignore commnet lines unless it contains pXX/dXXXX document ID
             if line.strip().startswith("%"):
                 m = re.search('/(p\d{2}/d\d{4})/', line)
@@ -171,7 +172,8 @@ def read_clfs(clf_file):
             cl_align = []
             # when there are alignments process them
             if tok_offs and tok_offs.find('] ') != -1:
-                for tok_off in tok_offs.strip().split('] '):
+                # treat also cases like: b3 REF e3   % ] [77...78]
+                for tok_off in re.split('(?<=[0-9])\] ', tok_offs.strip()):
                     m = re.match('([^ ]+) \[(\d+)\.\.\.(\d+)', tok_off)
                     tok, start, end = m.groups()
                     cl_align.append((tok, (int(start), int(end))))
@@ -518,7 +520,7 @@ def extract_splits_of_graphs(\
                             if throw_error: raise
                             continue
                         dict_drg = wrap_up('p{}/d{}'.format(p, d[1:]), raw, graph, con_pars['prov'])
-                        SPLIT.write(json.dumps(dict_drg) + '\n')
+                        SPLIT.write(json.dumps(dict_drg) + '\n', ensure_ascii=False)
                     else:
                         warning("one of the files doesn't exist: {}, {}".format(clf_file, raw_file))
     return error_counter
@@ -554,6 +556,7 @@ if __name__ == '__main__':
             for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
                 if args.ids and str(i) not in args.ids: continue
                 raw = list_of_raw[i]
+                #print(raw)
                 if args.with_align:
                     check_offsets(align, raw)
                 try:
@@ -564,7 +567,7 @@ if __name__ == '__main__':
                     if args.throw_error: raise
                     continue
                 dict_drg = wrap_up(pd, raw, graph, args.prov)
-                OUT.write(json.dumps(dict_drg) + ('\n' if i < num else ''))
+                OUT.write(json.dumps(dict_drg, ensure_ascii=False) + ('\n' if i < num else ''))
     # print erros if any:
     print("Done.")
     if error_counter:
