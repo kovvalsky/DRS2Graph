@@ -7,7 +7,7 @@
    * A file with CLFs inside as input & a file with DRGs inside as output
    Usage:
     python3 clf2graph.py --lang en  --data-dir pmb-3.0.0/data/  --out-dir working --status gold  --splits dev_00:00 test_10:10 --sig clf_signature.yaml  -v 2
-    python3 clf2graph.py --input ~/pmb_mine/out/p99/d9994/en.drs.clf --raw ~/pmb_mine/raw/p99/d9994/en.raw --output mtool/working/asbestos/drs.mrp --sig clf_signature.yaml
+    python3 clf2graph.py --input drs.clf --raw raw_texts.txt --output drs.mrp --sig clf_signature.yaml -rmid -bm arg1
 '''
 
 #################################
@@ -46,13 +46,13 @@ def parse_arguments():
         help="The file with clfs")
     parser.add_argument(
     '--raw', metavar="FILE_PATH",
-        help="The file containing raw text")
+        help="The file containing raw texts")
     parser.add_argument(
     '--raw-sep', metavar="STR", default="\n",
-        help="Separator for raw documents")
+        help="Separator of documents/texts in raw input")
     parser.add_argument(
     '--output', metavar="FILE_PATH",
-        help="The file where DRGs will be written")
+        help="The file where DRGs in mrp format will be written")
 
     # Arguments covering filters about splits, parts, annotation layers and their statuses
     parser.add_argument(
@@ -97,7 +97,7 @@ def parse_arguments():
         help="Throw an error instead of counting them")
     parser.add_argument(
     '--with-align', action="store_true",
-        help="Check alignments as they are mandatory to be present")
+        help="Include alignments and also check correctness of character offsets")
     parser.add_argument(
     '-v', dest="verbose", default=1, type=int, choices=[0, 1, 2], metavar="LEVEL",
         help="Verbosity of logging: warning(0), info(1), debug(2)")
@@ -171,7 +171,7 @@ def read_clfs(clf_file):
             # get every aligned token for a clause
             cl_align = []
             # when there are alignments process them
-            if tok_offs and tok_offs.find('] ') != -1:
+            if tok_offs and tok_offs.find(' [') != -1:
                 # treat also cases like: b3 REF e3   % ] [77...78]
                 for tok_off in re.split('(?<=[0-9])\] ', tok_offs.strip()):
                     m = re.match('([^ ]+) \[(\d+)\.\.\.(\d+)', tok_off)
@@ -331,7 +331,7 @@ def add_edges(edges, eds):
     for ed in eds:
         (s, t, l) = ed if len(ed) == 3 else (ed + (None,))
         assert isinstance(s, int) and isinstance(t, int), "Edge node IDs are integer"
-        e = {'source': s, 'target': t}
+        e = OrderedDict([('source', s), ('target', t)])
         if l: e['label'] = l
         edges.append(e)
 
@@ -348,7 +348,7 @@ def add_nodes(nodes, nds):
     for nd in nds:
         (type, node_id, label) = nd if len(nd) == 3 else (nd + (None,))
         assert isinstance(node_id, int), "Node ID is integer"
-        nodes.append({'id': node_id, 'label': label, 'type': type})
+        nodes.append(OrderedDict([('id', node_id), ('label', label), ('type', type)]))
 
 #################################
 def add_role(nodes, edges, cl, nid, role_id, pars={}):
@@ -377,23 +377,23 @@ def add_role(nodes, edges, cl, nid, role_id, pars={}):
 def clf2graph(clf, alignment, signature=None, pars={}):
     '''Convert a CLF and alignments into a DRG graph
     '''
-    # TODO implement -bm features
     # parse clf and check on correctness
     (box_dict, top_boxes, disc_rels, presupp_rels, cl_types, arg_typing) =\
         clfref.check_clf(clf, signature)
     assert len(clf) == len(cl_types), '#clauses == #clause_types'
+    # convert constants to nodes and get a mapping from terms to DIs
     nodes, nid = process_vars_constants(arg_typing)
     next_id = len(nid)
     # keep track of these
     edges = []
     # convert boxes into graph components
-    for b, box in box_dict.items():
+    for b, box in sorted(box_dict.items()):
         next_id = box2graph(box, nid, nodes, edges, next_id, arg_typing, pars=pars)
     # add discourse relations
-    for (r, b1, b2) in disc_rels:
+    for (r, b1, b2) in sorted(disc_rels):
         add_edges(edges, [ (nid[b1], nid[b2], r) ])
     # add presupposition relations
-    for (b1, b2) in presupp_rels:
+    for (b1, b2) in sorted(presupp_rels):
         add_edges(edges, [ (nid[b1], nid[b2], 'PRESUPPOSITION') ])
     # remove duplicate nodes but keep the order
     ord_set_nodes = sanity_check_nodes(nodes)
@@ -416,12 +416,12 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, pars={}):
     concept_conds = [ c for c in box.conds if re.match('"[avnr]\.\d\d"$', c[1]) ]
     concept_ref = [ c[2] for c in concept_conds ]
     # process referents. This guarantees intro of every referent node in its box
-    for x in box.refs:
+    for x in sorted(box.refs):
         add_nodes(nodes, [ ('x', nid[x]) ])
         if x not in concept_ref or pars['keep-refs']:
             # concept refs will be added when processing concept condition, important for -ce flag
             add_edges(edges, [ (nid[b], nid[x], 'in') ])
-    for c in box.conds:
+    for c in sorted(box.conds):
         (op, x, y) = c if len(c) == 3 else (c + (None,))
         # pmb2 version specific operators
         if len(c) == 2 and pars['pmb2']:
@@ -463,7 +463,7 @@ def process_vars_constants(arg_typing):
     t2id = { v: i for i, v in enumerate(terms) }
     # for constants already introduce labeled nodes
     const = set([a for a in terms if arg_typing[a] in 'c'])
-    nodes = [ {'id':t2id[c], 'type':'c', 'label':c} for c in const ]
+    nodes = [ OrderedDict([('id', t2id[c]), ('label', c), ('type', 'c')]) for c in sorted(const) ]
     # replace referents and boxes with IDs in all box_dict
     return nodes, t2id
 
@@ -483,7 +483,7 @@ def exists_hyponym_condition(con_cond, conditions):
 
 #################################
 def check_offsets(align, raw):
-    '''Check that ofsets really give the correct tokens'''
+    '''Check that offsets really give the correct tokens'''
     for cl_align in align:
         for tok, (start, end) in cl_align:
             if tok != raw[start:end].replace(' ', '~'):
