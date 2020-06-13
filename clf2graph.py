@@ -123,7 +123,7 @@ def parse_arguments():
     # check that at least dir or file input/output mode is active
     dir_mode = all([args.lang, args.data_dir, args.out_dir])
     if not dir_mode:
-        assert all([args.input, args.raw, args.output]), "File I/O mode is active"
+        assert all([args.input, args.raw]), "File I/O mode is active"
     # Set verbosity
     verbose = {0:logging.WARNING, 1:logging.INFO, 2:logging.DEBUG}
     logging.basicConfig(format='%(levelname)s: %(message)s', level=verbose[args.verbose])
@@ -195,11 +195,14 @@ def read_clfs(clf_file):
 def wrap_up(id, raw, graph, prov):
     '''Make a dictionary that will be dumped as json'''
     timestamp = datetime.now().strftime('%Y-%m-%d')
+    id_sorted_nodes = sorted(graph[0], key=lambda n: n['id'])
+    src_trg_ordered_edges = sorted(graph[1], key=lambda e: (e['source'], e['target']))
     item = [('id', id), ('flavor', 2), ('framework', 'drg'),
             ('version', '1.0'), ('time', timestamp),
             ('provenance', prov),
             ('input', raw), ('tops', graph[2]),
-            ('nodes', graph[0]), ('edges', graph[1])
+            ('nodes', id_sorted_nodes),
+            ('edges', src_trg_ordered_edges)
            ]
     return OrderedDict(item)
 
@@ -551,23 +554,29 @@ if __name__ == '__main__':
             if not list_of_raw[-1]: list_of_raw.pop()
         assert len(list_of_pd_clf_align) == len(list_of_raw), "Equal number of clfs and raws"
         error_counter = []
-        with open(args.output, 'w') as OUT:
-            num = len(list_of_pd_clf_align) - 1
-            for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
-                if args.ids and str(i) not in args.ids: continue
-                raw = list_of_raw[i]
-                #print(raw)
-                if args.with_align:
-                    check_offsets(align, raw)
-                try:
-                    graph = clf2graph(clf, align, signature=sig, pars=con_pars)
-                except:
-                    error("ID {}: {}\n{}".format(pd, raw, sys.exc_info()))
-                    error_counter.append((i, sys.exc_info()[0]))
-                    if args.throw_error: raise
-                    continue
-                dict_drg = wrap_up(pd, raw, graph, args.prov)
-                OUT.write(json.dumps(dict_drg, ensure_ascii=False) + ('\n' if i < num else ''))
+        if args.output:
+            OUT = open(args.output, 'w')
+        else:
+            OUT = sys.stdout
+        num = len(list_of_pd_clf_align) - 1
+        for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
+            if args.ids and str(i) not in args.ids: continue
+            raw = list_of_raw[i]
+            #print(raw)
+            if args.with_align:
+                check_offsets(align, raw)
+            try:
+                graph = clf2graph(clf, align, signature=sig, pars=con_pars)
+            except:
+                error("ID {}: {}\n{}".format(pd, raw, sys.exc_info()))
+                error_counter.append((i, sys.exc_info()[0]))
+                if args.throw_error: raise
+                continue
+            dict_drg = wrap_up(pd, raw, graph, args.prov)
+            print(([ i['id'] for i in dict_drg['nodes']]))
+            print(([ (i['source'], i['target']) for i in dict_drg['edges']]))
+            OUT.write(json.dumps(dict_drg, ensure_ascii=False) + ('\n' if i < num else ''))
+        if args.output: OUT.close()
     # print erros if any:
     print("Done.")
     if error_counter:
