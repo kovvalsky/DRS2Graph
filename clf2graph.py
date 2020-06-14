@@ -22,6 +22,7 @@ import sys
 import argparse
 from datetime import datetime
 import json
+import itertools as it
 from nltk.corpus import wordnet as wn # to detect redundant copncepts
 
 
@@ -96,14 +97,19 @@ def parse_arguments():
     '--throw-error', action="store_true",
         help="Throw an error instead of counting them")
     parser.add_argument(
-    '--with-align', action="store_true",
-        help="Include alignments and also check correctness of character offsets")
+    '--alignment', metavar="FILE_PATH",
+        help="Create a seperate file with alignments")
     parser.add_argument(
     '-v', dest="verbose", default=1, type=int, choices=[0, 1, 2], metavar="LEVEL",
         help="Verbosity of logging: warning(0), info(1), debug(2)")
     parser.add_argument(
-    '--prov', default="PMB (3.0.0)",
-        help="Provenance of the generated output")
+    '--prov', default="PMB (3.0.0)", help="Provenance of the generated output")
+    parser.add_argument(
+    '--frwk', default="drg", help="Framework name to be injected in mrp")
+    parser.add_argument(
+    '--mrpv', default=1.0, type=float, help="mrp version to be injected in mrp")
+    parser.add_argument(
+    '--flvr', default=2, type=int, help="Flavor type to be injected in mrp")
     parser.add_argument(
     '--sig', default = '',
         help='If added, this contains a file with all allowed roles\
@@ -192,41 +198,50 @@ def read_clfs(clf_file):
     return list_of_pd_clf_aligns
 
 #################################
-def wrap_up(id, raw, graph, prov):
-    '''Make a dictionary that will be dumped as json'''
-    timestamp = datetime.now().strftime('%Y-%m-%d')
+def graph2mrp(id, raw, graph, features):
+    '''Make a dictionary that will be dumped as json in mrp format
+    '''
+    framework = features.get('framework', 'drg')
     id_sorted_nodes = sorted(graph[0], key=lambda n: n['id'])
     src_trg_ordered_edges = sorted(graph[1], key=lambda e: (e['source'], e['target']))
-    item = [('id', id), ('flavor', 2), ('framework', 'drg'),
-            ('version', '1.0'), ('time', timestamp),
-            ('provenance', prov),
+    # format nodes and edges according to the framework
+    if framework == 'drg':
+        # get rid of anchors
+        keys = 'id label source target'.split()
+        nodes = [ keep_keys(n, keys) for n in id_sorted_nodes ]
+        edges = [ keep_keys(e, keys) for e in src_trg_ordered_edges ]
+    elif framework == 'alignment':
+        # get rid of labels and ?add ids to egdes
+        keys = 'id source target anchors'.split()
+        nodes = [ keep_keys(n, keys) for n in id_sorted_nodes ]
+        edges = [ keep_keys(e, keys) for e in src_trg_ordered_edges ]
+        for i, e in enumerate(edges):
+            e['id'] = i
+            e.move_to_end('id', last=False)
+    else:
+        raise ValueError('Unknown framework {}'.format(framework))
+    # construct the final mrp
+    item = [('id', id),
+            ('flavor', features.get('flavor', 2)),
+            ('framework', features.get('framework', 'drg')),
+            ('version', features.get('version', 1.0)),
+            ('time', datetime.now().strftime('%Y-%m-%d')),
+            ('provenance', features.get('provenance', 'PMB (3.0.0)')),
             ('input', raw), ('tops', graph[2]),
-            ('nodes', id_sorted_nodes),
-            ('edges', src_trg_ordered_edges)
+            ('nodes', nodes),
+            ('edges', edges)
            ]
     return OrderedDict(item)
+
+#################################
+def keep_keys(d, keys):
+    return OrderedDict([ (k, v) for k, v in d.items() if k in keys ])
 
 #################################
 def remove_quotes(s):
     '''Remove surrounding double-quotes'''
     assert set([s[0], s[-1]]) == set('"') and len(s) >= 3, "{} is quoted".format(s)
     return s[1:-1]
-
-#################################
-def hyponym_hypernym(ws1, ws2):
-    '''Given two synset strings, check if ws1 is hyponym of ws2
-    '''
-    if ws2 == 'entity.n.01':
-        return True
-    patch_isa = set([('morning.n.01', 'time.n.08'), ('day.n.03', 'time.n.08'),
-                     ('year.n.01', 'time.n.08'), ('century.n.01', 'time.n.08'),
-                    ]) # dev:480, train:6182
-    if (ws1, ws2) in patch_isa:
-        return True
-    # wordnet in the game
-    ss1, ss2 = wn.synset(ws1), wn.synset(ws2)
-    common = ss1.lowest_common_hypernyms(ss2)
-    return common == [ss2]
 
 #################################
 def connectivity_check(nodes, edges):
@@ -286,6 +301,7 @@ def sanity_check_nodes(nodes):
        Also remove node properties that have None value
     '''
     id2lab = {}
+    id2anch = defaultdict(list)
     for n in nodes:
         nid, nlab =  n['id'], n['label'] # note that all nodes have to have labels (can be None)
         if nid in id2lab: # this node was seen before
@@ -299,6 +315,7 @@ def sanity_check_nodes(nodes):
                 id2lab[nid] = nlab if nlab else seen_lab
         else:
             id2lab[nid] = nlab
+        id2anch[nid] += n['anchors']
     # get set of nodes that follows the original node order
     ord_set_nodes = []
     for n in nodes:
@@ -308,6 +325,11 @@ def sanity_check_nodes(nodes):
                 n['label'] = id2lab[n['id']]
             else:
                 del n['label']
+            # keep or remove the anchors
+            if id2anch[n['id']]: # has non empty anchors
+                n['anchors'] = aligns2anchors(id2anch[n['id']])
+            else:
+                del n['anchors']
             ord_set_nodes.append(n)
             id2lab.pop(n['id'], None)
     return ord_set_nodes
@@ -321,21 +343,32 @@ def clean_set(multi_list):
     for i in multi_list:
         if i not in ord_set:
             ord_set.append(i)
-    # remove None labels
+    # remove None labels and empty anchors
     for i in ord_set:
         if 'label' in i and i['label'] is None:
             del i['label']
+        if 'anchors' in i and not i['anchors']:
+            del i['anchors']
+        else:
+            i['anchors'] = aligns2anchors(i['anchors'])
     return ord_set
 
 #################################
-def add_edges(edges, eds):
+def aligns2anchors(aligns):
+    set_aligns = sorted(set([ al[1] for al in aligns ]))
+    return [ OrderedDict([('from', al[0]), ('to', al[1])]) for al in set_aligns ]
+
+
+#################################
+def add_edges(edges, eds, aligns=[]):
     '''Add tuple edges wrapped appropriately
     '''
-    for ed in eds:
+    for ed, al in it.zip_longest(eds, aligns, fillvalue=[]):
         (s, t, l) = ed if len(ed) == 3 else (ed + (None,))
         assert isinstance(s, int) and isinstance(t, int), "Edge node IDs are integer"
         e = OrderedDict([('source', s), ('target', t)])
         if l: e['label'] = l
+        e['anchors'] = al
         edges.append(e)
 
 #################################
@@ -345,16 +378,16 @@ def iter_subseteq_iter(iter1, iter2):
     return set(iter1) <= set(iter2)
 
 #################################
-def add_nodes(nodes, nds):
+def add_nodes(nodes, nds, aligns=[]):
     '''Add tuple nodes wrapped appropriately
     '''
-    for nd in nds:
+    for nd, al in it.zip_longest(nds, aligns, fillvalue=[]):
         (type, node_id, label) = nd if len(nd) == 3 else (nd + (None,))
         assert isinstance(node_id, int), "Node ID is integer"
-        nodes.append(OrderedDict([('id', node_id), ('label', label), ('type', type)]))
+        nodes.append(OrderedDict([('id', node_id), ('label', label), ('anchors', al), ('type', type)]))
 
 #################################
-def add_role(nodes, edges, cl, nid, role_id, pars={}):
+def add_role(nodes, edges, cl, nid, role_id, aligns, pars={}):
     '''Augment a graph with a role, taking into account the conversion mode of role clauses
     '''
     (b, role, e, x) = cl
@@ -362,7 +395,7 @@ def add_role(nodes, edges, cl, nid, role_id, pars={}):
     if pars['noarg'] and not pars['rmid']:
         raise RuntimeError('Role nodes as top without ARGn labeled egdes is a lossy format')
     # role clauses are always reified, and its label depends on the mode
-    add_nodes(nodes, [ ('rr', role_id, None if pars['rle'] else role) ])
+    add_nodes(nodes, [('rr', role_id, None if pars['rle'] else role)], [aligns])
     # label of edge from box to role
     add_edges(edges, [ (nid[b], role_id, role if pars['rle'] else 'in') ])
     # arg labels on edges from role to args (if required)
@@ -376,6 +409,21 @@ def add_role(nodes, edges, cl, nid, role_id, pars={}):
         add_edges(edges, [ (role_id, nid[e], arg1_lab), (role_id, nid[x], arg2_lab) ]) #TODO symetric operators
     # adding nodes depending on a mode
 
+
+#################################
+def clause_alignment(clf, cl_types, alignment):
+    '''Create a mapping from box & clause to alignments
+    '''
+    cl2al = defaultdict(dict)
+    for cl, ty, al in it.zip_longest(clf, cl_types, alignment):
+        b = cl[0]
+        if ty == 'REF': cl2al[b][cl[2]] = al
+        elif ty == 'PRE': cl2al[(cl[0], cl[2])] = al
+        elif ty == 'DRL': cl2al[(cl[1], cl[0], cl[2])] = al
+        elif ty in ('LEX', 'ROL'): cl2al[b][cl[1:]] = al
+        else: raise ValueError('Unknown type {}'.format(ty))
+    return cl2al
+
 #################################
 def clf2graph(clf, alignment, signature=None, pars={}):
     '''Convert a CLF and alignments into a DRG graph
@@ -384,6 +432,8 @@ def clf2graph(clf, alignment, signature=None, pars={}):
     (box_dict, top_boxes, disc_rels, presupp_rels, cl_types, arg_typing) =\
         clfref.check_clf(clf, signature)
     assert len(clf) == len(cl_types), '#clauses == #clause_types'
+    # map clauses to alignments
+    cl2al = clause_alignment(clf, cl_types, alignment)
     # convert constants to nodes and get a mapping from terms to DIs
     nodes, nid = process_vars_constants(arg_typing)
     next_id = len(nid)
@@ -391,13 +441,13 @@ def clf2graph(clf, alignment, signature=None, pars={}):
     edges = []
     # convert boxes into graph components
     for b, box in sorted(box_dict.items()):
-        next_id = box2graph(box, nid, nodes, edges, next_id, arg_typing, pars=pars)
+        next_id = box2graph(box, nid, nodes, edges, next_id, arg_typing, cl2al, pars=pars)
     # add discourse relations
     for (r, b1, b2) in sorted(disc_rels):
-        add_edges(edges, [ (nid[b1], nid[b2], r) ])
+        add_edges(edges, [(nid[b1], nid[b2], r)], [cl2al[(r, b1, b2)]])
     # add presupposition relations
     for (b1, b2) in sorted(presupp_rels):
-        add_edges(edges, [ (nid[b1], nid[b2], 'PRESUPPOSITION') ])
+        add_edges(edges, [(nid[b1], nid[b2], 'PRESUPPOSITION')], [cl2al[(b1, b2)]])
     # remove duplicate nodes but keep the order
     ord_set_nodes = sanity_check_nodes(nodes)
     if len(ord_set_nodes) != len(nodes):
@@ -412,18 +462,18 @@ def clf2graph(clf, alignment, signature=None, pars={}):
     return ord_set_nodes, edges, [nid[b] for b in top_boxes]
 
 #################################
-def box2graph(box, nid, nodes, edges, next_id, arg_typing, pars={}):
+def box2graph(box, nid, nodes, edges, next_id, arg_typing, cl2al, pars={}):
     b = box.name
-    add_nodes(nodes, [ ('b', nid[b]) ]) # this adds all box nodes
+    add_nodes(nodes, [('b', nid[b])]) # this adds all box nodes
     # extract concept conditions and referents
     concept_conds = [ c for c in box.conds if re.match('"[avnr]\.\d\d"$', c[1]) ]
     concept_ref = [ c[2] for c in concept_conds ]
     # process referents. This guarantees intro of every referent node in its box
     for x in sorted(box.refs):
-        add_nodes(nodes, [ ('x', nid[x]) ])
+        add_nodes(nodes, [('x', nid[x])], [cl2al[b][x]])
         if x not in concept_ref or pars['keep-refs']:
             # concept refs will be added when processing concept condition, important for -ce flag
-            add_edges(edges, [ (nid[b], nid[x], 'in') ])
+            add_edges(edges, [(nid[b], nid[x], 'in')])
     for c in sorted(box.conds):
         (op, x, y) = c if len(c) == 3 else (c + (None,))
         # pmb2 version specific operators
@@ -442,15 +492,19 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, pars={}):
         elif c in concept_conds: # LEX case
             assert arg_typing[y] == 'x', "Concept is not applied to a referent: {}".format(c)
             # skip a hypernym concept condition
-            if not exists_hyponym_condition(c, concept_conds):
+            hyp_cond = hyponym_condition(c, concept_conds)
+            if hyp_cond: # transfer alignment of general concept to the specific one
+                cl2al[b][hyp_cond] += cl2al[b][c]
+            else:
                 label = "{}.{}".format(op, remove_quotes(x))
-                add_nodes(nodes, [ ('x', nid[y], None if pars['ce'] else label) ])
+                lab = None if pars['ce'] else label
+                add_nodes(nodes, [('x', nid[y], lab)], [cl2al[b][(op, x, y)]])
                 add_edges(edges, [ (nid[b], nid[y], label if pars['ce'] else 'in') ])
         elif op[0].isupper():
             # sanity check: covers roles like "PartOf" and EQU
             assert iter_subseteq_iter([arg_typing[i] for i in (x,y)], "xc")\
                    and (op[0:2].istitle() or op.isupper()), "Suspicious role: {}".format(c)
-            add_role(nodes, edges, (b,) + c, nid, next_id, pars=pars)
+            add_role(nodes, edges, (b,) + c, nid, next_id, cl2al[b][c], pars=pars)
             next_id += 1
         else:
             raise RuntimeError("Cannot process condition {} in box {}".format(c, b))
@@ -466,35 +520,52 @@ def process_vars_constants(arg_typing):
     t2id = { v: i for i, v in enumerate(terms) }
     # for constants already introduce labeled nodes
     const = set([a for a in terms if arg_typing[a] in 'c'])
-    nodes = [ OrderedDict([('id', t2id[c]), ('label', c), ('type', 'c')]) for c in sorted(const) ]
+    nodes = [ OrderedDict([('id', t2id[c]), ('label', c), ('anchors', []), ('type', 'c')])\
+                for c in sorted(const) ]
     # replace referents and boxes with IDs in all box_dict
     return nodes, t2id
 
+#################################
+def hyponym_hypernym(ws1, ws2):
+    '''Given two synset strings, check if ws1 is hyponym of ws2
+    '''
+    if ws2 == 'entity.n.01':
+        return True
+    patch_isa = set([('morning.n.01', 'time.n.08'), ('day.n.03', 'time.n.08'),
+                     ('year.n.01', 'time.n.08'), ('century.n.01', 'time.n.08'),
+                    ]) # dev:480, train:6182
+    if (ws1, ws2) in patch_isa:
+        return True
+    # wordnet in the game
+    ss1, ss2 = wn.synset(ws1), wn.synset(ws2)
+    common = ss1.lowest_common_hypernyms(ss2)
+    return common == [ss2]
 
 #################################
-def exists_hyponym_condition(con_cond, conditions):
-    '''Returns True if for the concept condition there is hyponym concept condition
+def hyponym_condition(con_cond, conditions):
+    '''Returns condition that has a hyponym concept of the given lexical condition
     '''
-    # TODO morning.n.01 vs time.n.08
     (lex, sns, x) = con_cond
     ws = "{}.{}".format(lex, remove_quotes(sns))
     for c in conditions:
         if c != con_cond and x == c[2]:
             ws1 = "{}.{}".format(c[0], remove_quotes(c[1]))
             if hyponym_hypernym(ws1, ws):
-                return True
+                return c
 
 #################################
 def check_offsets(align, raw):
     '''Check that offsets really give the correct tokens'''
     for cl_align in align:
         for tok, (start, end) in cl_align:
-            if tok != raw[start:end].replace(' ', '~'):
-                error("Wrong offsets: {} != {}".format(tok, raw[start:end]))
+            # TOREPORT: out/p20/d3052/en.drs.clf has originally wrong span, though offsets are correct
+            if tok in ('morning~after~pill'): continue
+            assert tok == raw[start:end].replace(' ', '~'),\
+                "Wrong offsets: {} != {}".format(tok, raw[start:end])
 
 #################################
 def extract_splits_of_graphs(\
-    data_dir, lang, status, splits, out_dir, sig=False, with_align=False, con_pars={}, throw_error=False):
+    data_dir, lang, status, splits, out_dir, sig=False, alignment=False, con_pars={}, throw_error=False):
     parts_dir = op.join(data_dir, lang, status)
     error_counter = []
     for split_pattern in splits:
@@ -513,7 +584,7 @@ def extract_splits_of_graphs(\
                         pd, clf, align = read_clfs(clf_file)[0]
                         with open(raw_file) as RAW:
                             raw = RAW.read().rstrip() # trailing white space only
-                        if with_align: # check alignments if they are present
+                        if alignments: # check alignments if they are present
                             check_offsets(align, raw)
                         try:
                             graph = clf2graph(clf, align, signature=sig, pars=con_pars)
@@ -522,7 +593,7 @@ def extract_splits_of_graphs(\
                             error_counter.append((p, d, sys.exc_info()[0]))
                             if throw_error: raise
                             continue
-                        dict_drg = wrap_up('p{}/d{}'.format(p, d[1:]), raw, graph, con_pars['prov'])
+                        dict_drg = graph2mrp('p{}/d{}'.format(p, d[1:]), raw, graph, con_pars['prov'])
                         SPLIT.write(json.dumps(dict_drg) + '\n', ensure_ascii=False)
                     else:
                         warning("one of the files doesn't exist: {}, {}".format(clf_file, raw_file))
@@ -543,7 +614,7 @@ if __name__ == '__main__':
         if not op.exists(args.out_dir):
             os.makedirs(args.out_dir)
         error_counter = extract_splits_of_graphs(args.data_dir, args.lang, args.status,\
-                            args.splits, args.out_dir, sig=sig, with_align=args.with_align,\
+                            args.splits, args.out_dir, sig=sig, alignment=args.alignment,\
                             con_pars=con_pars, error=args.error)
     # the file I/O mode
     else:
@@ -554,16 +625,19 @@ if __name__ == '__main__':
             if not list_of_raw[-1]: list_of_raw.pop()
         assert len(list_of_pd_clf_align) == len(list_of_raw), "Equal number of clfs and raws"
         error_counter = []
+        # open files for writing
         if args.output:
             OUT = open(args.output, 'w')
         else:
             OUT = sys.stdout
+        if args.alignment: OVERLAYS = open(args.alignment, 'w')
+        # converting CLFs into Graphs one-by-one
         num = len(list_of_pd_clf_align) - 1
         for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
             if args.ids and str(i) not in args.ids: continue
             raw = list_of_raw[i]
             #print(raw)
-            if args.with_align:
+            if args.alignment:
                 check_offsets(align, raw)
             try:
                 graph = clf2graph(clf, align, signature=sig, pars=con_pars)
@@ -572,11 +646,23 @@ if __name__ == '__main__':
                 error_counter.append((i, sys.exc_info()[0]))
                 if args.throw_error: raise
                 continue
-            dict_drg = wrap_up(pd, raw, graph, args.prov)
-            print(([ i['id'] for i in dict_drg['nodes']]))
-            print(([ (i['source'], i['target']) for i in dict_drg['edges']]))
-            OUT.write(json.dumps(dict_drg, ensure_ascii=False) + ('\n' if i < num else ''))
+            # get main mrp graph
+            feats = {'framework': args.frwk, 'flavor' :args.flvr,
+                     'version': args.mrpv, 'provenance': args.prov }
+            main_mrp = graph2mrp(pd, raw, graph, feats)
+            #print(main_mrp)
+            OUT.write(json.dumps(main_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
+            # get alignments
+            if args.alignment:
+                feats['framework'] = 'alignment'
+                feats['flavor'] = 1
+                feats['version'] = 1.1
+                overlay_mrp = graph2mrp(pd, raw, graph, feats)
+                OVERLAYS.write(json.dumps(overlay_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
+            #print(([ i['id'] for i in dict_drg['nodes']]))
+            #print(([ (i['source'], i['target']) for i in dict_drg['edges']]))
         if args.output: OUT.close()
+        if args.alignment: OVERLAYS.close()
     # print erros if any:
     print("Done.")
     if error_counter:
