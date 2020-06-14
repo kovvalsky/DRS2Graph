@@ -54,6 +54,14 @@ def parse_arguments():
     parser.add_argument(
     '--output', metavar="FILE_PATH",
         help="The file where DRGs in mrp format will be written")
+    parser.add_argument(
+    '--alignment', metavar="FILE_PATH",
+        help="Create a seperate file with alignments")
+    parser.add_argument(
+    '--sig', default = '',
+        help='If added, this contains a file with all allowed roles\
+              otherwise a simple signature is used that\
+              mainly recognizes operators based on their formatting')
 
     # Arguments covering filters about splits, parts, annotation layers and their statuses
     parser.add_argument(
@@ -97,9 +105,6 @@ def parse_arguments():
     '--throw-error', action="store_true",
         help="Throw an error instead of counting them")
     parser.add_argument(
-    '--alignment', metavar="FILE_PATH",
-        help="Create a seperate file with alignments")
-    parser.add_argument(
     '-v', dest="verbose", default=1, type=int, choices=[0, 1, 2], metavar="LEVEL",
         help="Verbosity of logging: warning(0), info(1), debug(2)")
     parser.add_argument(
@@ -110,11 +115,6 @@ def parse_arguments():
     '--mrpv', default=1.0, type=float, help="mrp version to be injected in mrp")
     parser.add_argument(
     '--flvr', default=2, type=int, help="Flavor type to be injected in mrp")
-    parser.add_argument(
-    '--sig', default = '',
-        help='If added, this contains a file with all allowed roles\
-              otherwise a simple signature is used that\
-              mainly recognizes operators based on their formatting')
 
     # pre-processing arguments
     args = parser.parse_args()
@@ -559,7 +559,7 @@ def check_offsets(align, raw):
     '''Check that offsets really give the correct tokens'''
     # these are spans that boxer wrongly selects based on teh correct offsets
     problematic_spans = ('morning~after~pill', 'grownup', 'goalkeeper',
-                   'Washington~D.~C.', 'Washington~DC', 'blowtorch', 'ballpoint~pen') 
+                   'Washington~D.~C.', 'Washington~DC', 'blowtorch', 'ballpoint~pen')
     for cl_align in align:
         for tok, (start, end) in cl_align:
             if tok in problematic_spans: continue
