@@ -15,10 +15,13 @@ from os import path as op
 import logging
 from logging import debug, info, warning, error
 import clf_referee as clfref
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict, Counter
 import re
 import os
 import sys
+import math
+from functools import reduce
+from operator import mul
 import argparse
 from datetime import datetime
 import json
@@ -57,6 +60,15 @@ def parse_arguments():
     parser.add_argument(
     '--alignment', metavar="FILE_PATH",
         help="Create a seperate file with alignments")
+    parser.add_argument(
+    '--anchored-out', metavar="FILE_PATH",
+        help="Create a seperate file with graph and alignments together")
+    parser.add_argument(
+    '--id-guide', metavar="FILE_PATH",
+        help="Path to mrp file the node ids of whoich current output shoudl follow")
+    parser.add_argument(
+    '--mappings', metavar="FILE_PATH",
+        help="File that contains mappings of some IDs to help for matching")
     parser.add_argument(
     '--sig', default = '',
         help='If added, this contains a file with all allowed roles\
@@ -206,8 +218,11 @@ def graph2mrp(id, raw, graph, features):
     src_trg_ordered_edges = sorted(graph[1], key=lambda e: (e['source'], e['target']))
     # format nodes and edges according to the framework
     if framework == 'drg':
-        # get rid of anchors
-        keys = 'id label source target'.split()
+        # get rid of anchors if not required
+        if features.get('flavor', 2) == 1:
+            keys = 'id label source target anchors'.split()
+        else:
+            keys = 'id label source target'.split()
         nodes = [ keep_keys(n, keys) for n in id_sorted_nodes ]
         edges = [ keep_keys(e, keys) for e in src_trg_ordered_edges ]
     elif framework == 'alignment':
@@ -227,10 +242,12 @@ def graph2mrp(id, raw, graph, features):
             ('version', features.get('version', 1.0)),
             ('time', datetime.now().strftime('%Y-%m-%d')),
             ('provenance', features.get('provenance', 'PMB (3.0.0)')),
-            ('input', raw), ('tops', graph[2]),
+            ('input', raw),
             ('nodes', nodes),
             ('edges', edges)
            ]
+    if framework == 'drg':
+        item = item[:7] + [('tops', graph[2])] + item[7:]
     return OrderedDict(item)
 
 #################################
@@ -567,6 +584,97 @@ def check_offsets(align, raw):
                 "Wrong offsets: {} != {}".format(tok, raw[start:end])
 
 #################################
+def read_guide_mrp(guide_mrp):
+    '''Read guide MRP is a dictionary
+    '''
+    guide = dict()
+    with open(guide_mrp) as F:
+        for l in F:
+            g = json.loads(l)
+            guide[g['id']] = (g['nodes'], g['edges'])
+    return guide
+
+#################################
+def guided_id_renaming(id, guide_mrp, graph, mappings={}):
+    '''Adopt the node ids that are presented in guide mrp
+    '''
+    match_found = False
+    nodes, edges, top = graph
+    gnodes, gedges = guide_mrp[id]
+    assert len(nodes) == len(gnodes), "{}: #nodes {} != {}".format(id, len(nodes), len(gnodes))
+    assert len(edges) == len(gedges), "{}: #edges {} != {}".format(id, len(edges), len(gedges))
+    # map nodes based on unique labels
+    mapping = mappings[id] if id in mappings else {} # mapping from working to guide mrp
+    uniq_id_labs, nuniq_lab_ids = nodes_uniq_rest(nodes, excl_ids=list(mapping.keys()))
+    uniq_gid_glabs, nuniq_glab_gids = nodes_uniq_rest(gnodes, excl_ids=list(mapping.values()))
+    assert len(uniq_id_labs) == len(uniq_gid_glabs),\
+        "{}: diff num of once occuring: {} != {}".format(id, uniq_id_labs, uniq_gid_glabs)
+    # create initial mapping absed on unque labels
+    for i, l in uniq_id_labs:
+        mapping[i] = next( gi for gi, gl in uniq_gid_glabs if gl == l )
+    # do complete search untill mapping results full match
+    n_poss = reduce(mul, [ math.factorial(len(v)) for v in nuniq_lab_ids.values() ], 1)
+    if n_poss > 300000:
+        print('Mapping search {}: {} possibilities'.format(id, n_poss))
+    #return graph
+    for mini_map in possible_mappings(nuniq_lab_ids, nuniq_glab_gids):
+        #print('.', end='')
+        full_map = {**mapping, **mini_map}
+        assert len(full_map.values()) == len(full_map.keys()),\
+            '{}: weak check on bijection'.format(id)
+        if full_match(full_map, nodes, gnodes, edges, gedges):
+            match_found = True
+            break
+    # apply full mapping to nodes and edges
+    if not match_found:
+        raise RuntimeError('Full match was not found')
+    rnodes = [ OrderedDict(list(n.items()) + [('id', full_map[n['id']])]) for n in nodes ]
+    redges = [ OrderedDict(list(e.items()) +
+                [('source', full_map[e['source']]), ('target', full_map[e['target']])])
+                for e in edges ]
+    return rnodes, redges, top
+
+
+
+
+#################################
+def possible_mappings(lab_ids1, lab_ids2):
+    permut_dict = dict()
+    for lab, ids in lab_ids1.items():
+        assert len(lab_ids2[lab]) == len(ids), "{} =! {}".format(lab_ids1, lab_ids2)
+        permut_dict[lab] = list(it.permutations(ids))
+    sorted_keys = sorted(lab_ids1.keys())
+    ids2 = [ i for k in sorted_keys for i in lab_ids2[k] ]
+    for permu in it.product(*[permut_dict[lab] for lab in sorted_keys]):
+        per = [ i for l in permu for i in l ]
+        yield dict(zip(per, ids2))
+
+
+#################################
+def full_match(full_map, nodes, gnodes, edges, gedges):
+    nset = set( (full_map[n['id']], n['label'] if 'label' in n else None) for n in nodes )
+    gnset = set( (n['id'], n['label'] if 'label' in n else None) for n in gnodes )
+    if nset != gnset: return None
+    eset = set( (full_map[e['source']], full_map[e['target']]) for e in edges )
+    geset = set( (e['source'], e['target']) for e in gedges )
+    if eset != geset: return None
+    return True
+
+#################################
+def nodes_uniq_rest(nodes, excl_ids=[]):
+    lab_ids = defaultdict(list)
+    for n in nodes:
+        if n['id'] in excl_ids: continue
+        lab = n['label'] if 'label' in n else ''
+        lab_ids[lab].append(n['id'])
+    # ids and their unique labels
+    uniq_id_labs = [ (ids[0], l) for l, ids in lab_ids.items() if len(ids) == 1  ]
+    # non-unique labs and their associated id list
+    nuniq_lab_ids = { l: ids for l, ids in lab_ids.items() if len(ids) != 1 }
+    return uniq_id_labs, nuniq_lab_ids
+
+
+#################################
 def extract_splits_of_graphs(\
     data_dir, lang, status, splits, out_dir, sig=False, alignment=False, con_pars={}, throw_error=False):
     parts_dir = op.join(data_dir, lang, status)
@@ -634,10 +742,21 @@ if __name__ == '__main__':
         else:
             OUT = sys.stdout
         if args.alignment: OVERLAYS = open(args.alignment, 'w')
+        if args.anchored_out: ANCH_MRP = open(args.anchored_out, 'w')
+        # read guide mrp if specified
+        if args.id_guide:
+            guide_mrp = read_guide_mrp(args.id_guide)
+        mappings = dict()
+        if args.mappings:
+            with open(args.mappings) as MAP:
+                for l in MAP:
+                    m = json.loads(l)
+                    assert len(m['from']) == len(m['to']), 'ill mapping'
+                    mappings[m['id']] = dict(zip(m['from'], m['to']))
         # converting CLFs into Graphs one-by-one
         num = len(list_of_pd_clf_align) - 1
         for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
-            if args.ids and str(i) not in args.ids: continue
+            if args.ids and not(str(i) in args.ids or pd in args.ids): continue
             raw = list_of_raw[i]
             #print(raw)
             if args.alignment:
@@ -650,10 +769,18 @@ if __name__ == '__main__':
                 error_counter.append((i, sys.exc_info()[0]))
                 if args.throw_error: raise
                 continue
+            # rename ids as in the guided mrp, if the latter is provided
+            if args.id_guide:
+                #if pd not in ('p39/d0065', 'p95/d3515', 'p26/d3035', 'p05/d2605', 'p47/d0755', 'p42/d0704', 'p23/d0064', 'p44/d3456', 'p23/d1469', 'p59/d2962', 'p08/d1387'):
+                graph = guided_id_renaming(pd, guide_mrp, graph, mappings=mappings)
             # get main mrp graph
             feats = {'framework': args.frwk, 'flavor' :args.flvr,
                      'version': args.mrpv, 'provenance': args.prov }
             main_mrp = graph2mrp(pd, raw, graph, feats)
+            if args.anchored_out:
+                feats['flavor'] = 1
+                anchored_mrp = graph2mrp(pd, raw, graph, feats)
+                ANCH_MRP.write(json.dumps(anchored_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
             #print(main_mrp)
             OUT.write(json.dumps(main_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
             # get alignments
@@ -667,6 +794,7 @@ if __name__ == '__main__':
             #print(([ (i['source'], i['target']) for i in dict_drg['edges']]))
         if args.output: OUT.close()
         if args.alignment: OVERLAYS.close()
+        if args.anchored_out: ANCH_MRP.close()
     # print erros if any:
     print("Done.")
     if error_counter:
