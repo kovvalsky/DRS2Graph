@@ -154,6 +154,17 @@ def parse_arguments():
 
 
 #################################
+def read_mappings(mapping_file):
+    mappings = dict()
+    with open(mapping_file) as MAP:
+        for l in MAP:
+            m = json.loads(l)
+            assert len(m['from']) == len(m['to']), 'ill mapping'
+            mappings[m['id']] = dict(zip(m['from'], m['to']))
+    return mappings
+
+
+#################################
 def read_clfs(clf_file):
     '''Read clfs and token alignments from a file and return
        a list of CLFs, where each CLF is a pair of
@@ -746,13 +757,8 @@ if __name__ == '__main__':
         # read guide mrp if specified
         if args.id_guide:
             guide_mrp = read_guide_mrp(args.id_guide)
-        mappings = dict()
-        if args.mappings:
-            with open(args.mappings) as MAP:
-                for l in MAP:
-                    m = json.loads(l)
-                    assert len(m['from']) == len(m['to']), 'ill mapping'
-                    mappings[m['id']] = dict(zip(m['from'], m['to']))
+        # read node mappings if provided
+        mappings = read_mappings(args.mappings) if args.mappings else dict()
         # converting CLFs into Graphs one-by-one
         num = len(list_of_pd_clf_align) - 1
         for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
@@ -771,7 +777,6 @@ if __name__ == '__main__':
                 continue
             # rename ids as in the guided mrp, if the latter is provided
             if args.id_guide:
-                #if pd not in ('p39/d0065', 'p95/d3515', 'p26/d3035', 'p05/d2605', 'p47/d0755', 'p42/d0704', 'p23/d0064', 'p44/d3456', 'p23/d1469', 'p59/d2962', 'p08/d1387'):
                 graph = guided_id_renaming(pd, guide_mrp, graph, mappings=mappings)
             # get main mrp graph
             feats = {'framework': args.frwk, 'flavor' :args.flvr,
