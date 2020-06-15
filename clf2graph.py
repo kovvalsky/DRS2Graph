@@ -223,41 +223,44 @@ def read_clfs(clf_file):
 #################################
 def graph2mrp(id, raw, graph, features):
     '''Make a dictionary that will be dumped as json in mrp format
+       features must have keys: frwk, mrpv, flvr, prov keys
     '''
-    framework = features.get('framework', 'drg')
+    frwk = features['frwk']
     id_sorted_nodes = sorted(graph[0], key=lambda n: n['id'])
     src_trg_ordered_edges = sorted(graph[1], key=lambda e: (e['source'], e['target']))
+    # if mrp version is 1.1 then add ids to edges following the src-trg order
+    if features['mrpv'] == 1.1:
+        for i, e in enumerate(src_trg_ordered_edges):
+            e['id'] = i
+            e.move_to_end('id', last=False)
     # format nodes and edges according to the framework
-    if framework == 'drg':
+    if frwk == 'drg':
         # get rid of anchors if not required
-        if features.get('flavor', 2) == 1:
+        if features['flvr'] == 1:
             keys = 'id label source target anchors'.split()
         else:
             keys = 'id label source target'.split()
         nodes = [ keep_keys(n, keys) for n in id_sorted_nodes ]
         edges = [ keep_keys(e, keys) for e in src_trg_ordered_edges ]
-    elif framework == 'alignment':
-        # get rid of labels and ?add ids to egdes
-        keys = 'id source target anchors'.split()
+    elif frwk == 'alignment':
+        # leave only ids and anchors
+        keys = 'id anchors'.split()
         nodes = [ keep_keys(n, keys) for n in id_sorted_nodes ]
         edges = [ keep_keys(e, keys) for e in src_trg_ordered_edges ]
-        for i, e in enumerate(edges):
-            e['id'] = i
-            e.move_to_end('id', last=False)
     else:
-        raise ValueError('Unknown framework {}'.format(framework))
+        raise ValueError('Unknown framework {}'.format(frwk))
     # construct the final mrp
     item = [('id', id),
-            ('flavor', features.get('flavor', 2)),
-            ('framework', features.get('framework', 'drg')),
-            ('version', features.get('version', 1.0)),
+            ('flavor', features['flvr']),
+            ('framework', features['frwk']),
+            ('version', features['mrpv']),
             ('time', datetime.now().strftime('%Y-%m-%d')),
-            ('provenance', features.get('provenance', 'PMB (3.0.0)')),
+            ('provenance', features['prov']),
             ('input', raw),
             ('nodes', nodes),
             ('edges', edges)
            ]
-    if framework == 'drg':
+    if frwk == 'drg':
         item = item[:7] + [('tops', graph[2])] + item[7:]
     return OrderedDict(item)
 
@@ -731,6 +734,8 @@ if __name__ == '__main__':
     con_pars = {'pmb2':args.pmb2, 'keep-refs':args.keep_refs, 'ce':args.ce,
                 'bm':args.bm, 'noarg':args.noarg, 'rmid':args.rmid, 'rle':args.rle,
                 'prov':args.prov }
+    # get main mrp graph's meta info
+    feats = { k: vars(args)[k] for k in 'frwk mrpv flvr prov'.split() }
     # the directory I/O mode
     if all([args.lang, args.out_dir, args.data_dir]):
         if not op.exists(args.out_dir):
@@ -778,21 +783,17 @@ if __name__ == '__main__':
             # rename ids as in the guided mrp, if the latter is provided
             if args.id_guide:
                 graph = guided_id_renaming(pd, guide_mrp, graph, mappings=mappings)
-            # get main mrp graph
-            feats = {'framework': args.frwk, 'flavor' :args.flvr,
-                     'version': args.mrpv, 'provenance': args.prov }
+            feats.update({'frwk':args.frwk, 'flvr':args.flvr})
             main_mrp = graph2mrp(pd, raw, graph, feats)
             if args.anchored_out:
-                feats['flavor'] = 1
+                feats['flvr'] = 1
                 anchored_mrp = graph2mrp(pd, raw, graph, feats)
                 ANCH_MRP.write(json.dumps(anchored_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
             #print(main_mrp)
             OUT.write(json.dumps(main_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
             # get alignments
             if args.alignment:
-                feats['framework'] = 'alignment'
-                feats['flavor'] = 1
-                feats['version'] = 1.1
+                feats.update({'frwk':'alignment', 'flvr':1})
                 overlay_mrp = graph2mrp(pd, raw, graph, feats)
                 OVERLAYS.write(json.dumps(overlay_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
             #print(([ i['id'] for i in dict_drg['nodes']]))
