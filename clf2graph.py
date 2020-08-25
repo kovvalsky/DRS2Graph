@@ -65,7 +65,7 @@ def parse_arguments():
         help="Create a seperate file with graph and alignments together")
     parser.add_argument(
     '--id-guide', metavar="FILE_PATH",
-        help="Path to mrp file the node ids of whoich current output shoudl follow")
+        help="Path to mrp file the node ids of whoich current output should follow")
     parser.add_argument(
     '--mappings', metavar="FILE_PATH",
         help="File that contains mappings of some IDs to help for matching")
@@ -97,10 +97,10 @@ def parse_arguments():
     parser.add_argument(
     '-bm', '--box-membership', dest='bm', default='all', choices=['all', 'a1', 'arg1', 'role'],
         help="Show box membership for all nodes, for both role args but not for a role (if possible), "
-        "for arg1 but nor for role and arg2 (if possible), only for role but not for args (if possible)")
+        "for arg1 but not for role and arg2 (if possible), only for role but not for args (if possible)")
     parser.add_argument(
     '-noarg', '--no-role-arg', dest='noarg', action='store_true',
-        help="Don't use ARG1 and ARG2 labels for the deges spanning between a role node and its arguments")
+        help="Don't use ARG1 and ARG2 labels for the eges spanning between a role node and its arguments")
     parser.add_argument(
     '-rmid', '--role-as-midway', dest='rmid', action='store_true',
         help="Whether a role node is a parent or midway for its arguments")
