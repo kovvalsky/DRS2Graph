@@ -179,7 +179,7 @@ def read_clfs(clf_file):
             #print("{}:\t{}".format(i, line))
             # ignore commnet lines unless it contains pXX/dXXXX document ID
             if line.strip().startswith("%"):
-                m = re.search('/(p\d{2}/d\d{4})/', line)
+                m = re.search('(p\d{2}/d\d{4})', line)
                 if m:
                     pd = m.group(1)
                 continue
