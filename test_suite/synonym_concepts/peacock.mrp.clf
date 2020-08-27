@@ -1,0 +1,79 @@
+%%% p78/d3170
+%%% The peacock (Inachis io) is a beautiful and easily recognizable butterfly.
+b1 CONDITION b2
+b2 CONSEQUENCE b3
+b2 EQU x7 "now"
+b2 REF x7
+b2 REF x8
+b2 peacock "n.01" x8
+b2 time "n.08" x7
+b3 Attribute x9 x5
+b3 Attribute x9 x6
+b3 Co-Theme x4 x9
+b3 REF x4
+b3 REF x5
+b3 REF x6
+b3 REF x9
+b3 Theme x4 x8
+b3 Time x4 x7
+b3 be "v.01" x4
+b3 beautiful "a.01" x5
+b3 butterfly "n.01" x9
+b3 recognizable "a.01" x6
+
+%%% p53/d1387
+%%% What award did director Quentin Tarantino's film, "Pulp Fiction", win in the Cannes Film Festival?
+b5 Creator x11 x12
+b5 Name x11 "pulp~fiction"
+b5 PRESUPPOSITION b7
+b5 REF x11
+b5 movie "n.01" x11
+b6 Name x12 "quentin~tarantino"
+b6 PRESUPPOSITION b5
+b6 PRESUPPOSITION b7
+b6 REF x12
+b6 REF x13
+b6 Role x12 x13
+b6 director "n.04" x13
+b6 male "n.02" x12
+b7 Context x9 x15
+b7 Name x14 "?"
+b7 Pivot x9 x11
+b7 REF x10
+b7 REF x14
+b7 REF x9
+b7 TPR x10 "now"
+b7 Theme x9 x14
+b7 Time x9 x10
+b7 award "n.02" x14
+b7 time "n.08" x10
+b7 win "v.01" x9
+b8 Name x15 "cannes~film~festival"
+b8 PRESUPPOSITION b7
+b8 REF x15
+b8 festival "n.02" x15
+
+%%% p03/d3386
+%%% We believed that the object was a UFO (Unidentified Flying Object).
+b2 ATTRIBUTION b3
+b2 Experiencer x5 "speaker"
+b2 REF x5
+b2 REF x7
+b2 REF x8
+b2 Stimulus x5 x7
+b2 TPR x8 "now"
+b2 Time x5 x8
+b2 believe "v.01" x5
+b2 proposition "n.01" x7
+b2 time "n.08" x8
+b3 Co-Theme x6 x9
+b3 REF x6
+b3 REF x9
+b3 Theme x6 x10
+b3 Time x6 x8
+b3 be "v.01" x6
+b3 unidentified_flying_object "n.01" x9
+b4 PRESUPPOSITION b3
+b4 REF x10
+b4 object "n.01" x10
+

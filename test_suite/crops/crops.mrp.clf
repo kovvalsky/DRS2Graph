@@ -1,0 +1,44 @@
+%%% p99/d9999
+%%% A similar technique is almost impossible to apply to other crops, such as cotton, soybeans and rice.
+b1 ATTRIBUTION b2
+b1 Attribute x10 x6
+b1 Degree x7 x8
+b1 EQU x9 "now"
+b1 REF x10
+b1 REF x5
+b1 REF x6
+b1 REF x7
+b1 REF x8
+b1 REF x9
+b1 Theme x7 x10
+b1 Time x7 x9
+b1 Topic x7 x5
+b1 almost "r.01" x8
+b1 impossible "a.01" x7
+b1 proposition "n.01" x5
+b1 similar "a.01" x6
+b1 technique "n.01" x10
+b1 time "n.08" x9
+b2 Goal x4 x12
+b2 Instance x12 x11
+b2 NEQ x12 x13
+b2 REF x11
+b2 REF x12
+b2 REF x14
+b2 REF x15
+b2 REF x16
+b2 REF x4
+b2 Sub x11 x14
+b2 Sub x11 x15
+b2 Sub x11 x16
+b2 Theme x4 x10
+b2 apply "v.01" x4
+b2 cotton "n.01" x14
+b2 crop "n.01" x12
+b2 entity "n.01" x11
+b2 rice "n.01" x16
+b2 soybean "n.03" x15
+b3 PRESUPPOSITION b2
+b3 REF x13
+b3 crop "n.01" x13
+
