@@ -583,6 +583,10 @@ def hyponym_condition(con_cond, conditions):
         if c != con_cond and x == c[2]:
             ws1 = "{}.{}".format(c[0], remove_quotes(c[1]))
             if hyponym_hypernym(ws1, ws):
+                if hyponym_hypernym(ws, ws1):
+                    # if a synonymous condition found, remove current one
+                    # so that the other will be added when emcountered
+                    conditions.remove(con_cond)
                 return c
 
 #################################
