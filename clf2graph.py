@@ -498,7 +498,7 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, cl2al, pars={}):
     b = box.name
     add_nodes(nodes, [('b', nid[b])]) # this adds all box nodes
     # extract concept conditions and referents
-    concept_conds = [ c for c in box.conds if re.match('"[avnr]\.\d\d"$', c[1]) ]
+    concept_conds = sorted([ c for c in box.conds if re.match('"[avnr]\.\d\d"$', c[1]) ])
     concept_ref = [ c[2] for c in concept_conds ]
     # process referents. This guarantees intro of every referent node in its box
     for x in sorted(box.refs):
