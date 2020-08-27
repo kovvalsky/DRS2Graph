@@ -259,7 +259,9 @@ def file_to_clfs(filepath, v=0):
             # remove % comments if any
             line = line.split(' %', 1)[0].strip()
             if v >= 5: print("/{}/".format(line))
-            clause = tuple(line.split(' '))
+            #clause = tuple(line.split(' '))
+            # more elaborated chopping that allows whitespace bewteen double quotes
+            clause = tuple(re.findall('([^ "][^ ]*|"[^"]+")', line))
             if len(clause) > 1: #remove lines that are comments and started with whitespace
                 clf.append(clause)
     if clf: # add last clf
