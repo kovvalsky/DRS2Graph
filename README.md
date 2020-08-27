@@ -1,20 +1,9 @@
-The repository contains scripts that help to convert Discourse Representation Structures (DRSs) into Graph formatted as JSON, the format adopted at this [meaning representation parsing shared task](http://mrp.nlpl.eu)   
+The repository contains scripts that help to convert Discourse Representation Structures (DRSs) into Graph formatted as JSON, the format adopted at the [MRP shared task](http://mrp.nlpl.eu/2020), and back from the graph to DRS.     
 
-### Convert DRSs in a CLF form into MRP graphs
+### Convert DRSs from the Clausal Form (CLF) to Discourse Representation Graphs (DRG)
 `clf2graph.py` supports different types of conversion depending on how to represent concept or role clauses (labelled node vs labelled edge), where to place role nodes (between vs as a parent of arguments), and whether to label argument edges (with vs without ARG[12]).  
 
-An example of converting `dev.txt` into `dev.bmall.mrp`, treating role and concept DRS conditions as labeled nodes, labeling role argument edges with `ARG1` and `ARG2`, and explicitly asserting box memberships for all discourse referents and reified roles (`-bm all`):
-
-```
-./clf2graph.py --input pmb-gold-split/clf/dev.txt --raw pmb-gold-split/clf/dev.txt.raw --output pmb-gold-split/mrp/dev.bmall.mrp --sig clf_signature.yaml # -bm all parameter is by default
-```
-
-Get simpler graphs where box-membership edges are often omitted for roles (see the definition of the parameters below):
-```
-./clf2graph.py --input pmb-gold-split/clf/dev.txt --raw pmb-gold-split/clf/dev.txt.raw --output pmb-gold-split/mrp/dev.rmid-bmarg1.mrp -rmid -bm arg1 --sig clf_signature.yaml
-```
-
-#### Supported conversion types
+#### Supported conversion parameters
    - `-ce` treat concepts as labelled edges, otherwise as labelled nodes (default)  
    - `-rle` treat roles as unlabeled nodes with ingoing labelled edges, otherwise as labelled nodes (default)  
    - `-rmid` place roles between their arguments, otherwise as a parent of its arguments (default)  
@@ -24,7 +13,19 @@ Get simpler graphs where box-membership edges are often omitted for roles (see t
      - `bm` edges are kept for `role`s but omitted for role arguments if both arguments (excepy constants) have the same membership as their role;
      - `arg1` `bm` edges are kept, but removed for its role if `arg1` has only that `bm` edge what its role has.
      - `a1` further develops `arg1` and also omits the `bm` edge for arg2 if the latter has `bm` edge for the same box as arg1 and teh role.
-     -
-### Requirements
 
+#### CLF ↦ MRP DRG 
+For example, the DRGs used in the [MRP shared task](http://mrp.nlpl.eu/2020/) are produced with (using a sample DRS): 
+```
+./clf2graph.py --input test_suite/crops/crops.clf --raw test_suite/crops/crops.raw --output test_suite/crops/crops.mrp -noarg -rmid -bm arg1 --sig clf_signature.yaml
+```
+Note that with this particular combination of parameters, some CLFs might not be convertible as the conversion assumes a single (maximally specific) concept per discourse referent.   
+
+#### MRP DRG ↦ CLF
+Clausal forms can be recovered from MRP DRGs by:
+```
+./mrp2clf.py --mrp test_suite/crops/crops.mrp --clf test_suite/crops/crops.mrp.clf --sig clf_signature.yaml
+```
+
+### Requirements
 Python 3
