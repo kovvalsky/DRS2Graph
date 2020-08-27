@@ -765,7 +765,6 @@ if __name__ == '__main__':
         # read node mappings if provided
         mappings = read_mappings(args.mappings) if args.mappings else dict()
         # converting CLFs into Graphs one-by-one
-        num = len(list_of_pd_clf_align) - 1
         for i, (pd, clf, align) in enumerate(list_of_pd_clf_align):
             if args.ids and not(str(i) in args.ids or pd in args.ids): continue
             raw = list_of_raw[i]
@@ -788,14 +787,14 @@ if __name__ == '__main__':
             if args.anchored_out:
                 feats['flvr'] = 1
                 anchored_mrp = graph2mrp(pd, raw, graph, feats)
-                ANCH_MRP.write(json.dumps(anchored_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
+                ANCH_MRP.write(json.dumps(anchored_mrp, ensure_ascii=False) + '\n')
             #print(main_mrp)
-            OUT.write(json.dumps(main_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
+            OUT.write(json.dumps(main_mrp, ensure_ascii=False) + '\n')
             # get alignments
             if args.alignment:
                 feats.update({'frwk':'alignment', 'flvr':1})
                 overlay_mrp = graph2mrp(pd, raw, graph, feats)
-                OVERLAYS.write(json.dumps(overlay_mrp, ensure_ascii=False) + ('\n' if i < num else ''))
+                OVERLAYS.write(json.dumps(overlay_mrp, ensure_ascii=False) + '\n')
             #print(([ i['id'] for i in dict_drg['nodes']]))
             #print(([ (i['source'], i['target']) for i in dict_drg['edges']]))
         if args.output: OUT.close()
