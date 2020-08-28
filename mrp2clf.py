@@ -36,6 +36,9 @@ def parse_arguments():
     '--validate', action="store_true",
         help="Validate with CLF referee")
     parser.add_argument(
+    '--quiet', '-q',  action="store_true",
+        help="Print minimal info")
+    parser.add_argument(
     '--throw-error', action="store_true",
         help="Throw an error instead of counting them")
     parser.add_argument(
@@ -54,16 +57,20 @@ def print_dict(d, pr=True):
     if pr: print(message)
     return message
 
+def error_raise(message):
+    #error(message)
+    raise RuntimeError(message)
+
 def find_disjunctions(edges):
-    for (s1, t1), e1 in edges.items():
+    for (s1, t1), e1 in sorted(edges.items()):
         if e1['lab'] == 'DIS':
-            for (s2, t2), e2 in edges.items():
+            for (s2, t2), e2 in sorted(edges.items()):
                 if e2['lab'] == 'DIS':
                     if t1 == s2:
                         yield s1, t1, t2
 
 
-def find_binary_pred_condition(node, edges, node_types, id=None):
+def find_binary_pred_condition(node, edges, node_types):
     args, b, edge_num = [None, None], None, 0
     nid, _ = node
     for s_t in edges:
@@ -71,27 +78,37 @@ def find_binary_pred_condition(node, edges, node_types, id=None):
             edge_num += 1
             i = 1 - s_t.index(nid)
             if node_types[s_t[i]] == 'b':
-                b = s_t[i] # box which is containg the predcate found
+                if b:
+                    error_raise("Binary pred {} is in two boxes: {}, {}".format(node, b, s_t[i]))
+                b = s_t[i] # box which is containg the predicate found
             else:
+                if args[i]:
+                    error_raise("Binary pred {} has two {}th args: {}, {}".format(\
+                        node, i, args[i], s_t[i]))
                 args[i] = s_t[i] # argument found
-    if not(2 <= edge_num <= 3):
-        error("{}: Binary pred {} has many edges ({})".format(id, node, edge_num))
     if any([ j is None for j in args ]):
-        error("{}: Binary pred {} is missing args ({})".format(id, node, args))
+        error_raise("Binary pred {} is missing args ({})".format(node, args))
+    if not(2 <= edge_num <= 3):
+        error_raise("Binary pred {} has wrong number of edges ({})".format(node, edge_num))
     if b is None:
         b = next((s for (s, t) in edges if t == args[0] and node_types.get(s, 0) == 'b'), None)
     if b is None:
-        error("{}: can't find box of Binary pred {}".format(id, node))
+        error_raise("Can't find box of Binary pred {}".format(node))
     return b, args
 
 
 #######################################
-def mrp2clf(mrp, throw_error=False):
+def mrp2clf(mrp, fix=[]):
     # read nodes and edges and add None labels if they don't have any
-    clf_info = {}
-    node_types = {}
-    nodes = { n['id']: {'lab':n.get('label', None)} for n in mrp['nodes'] }
-    edges = { (e['source'], e['target']): {'lab':e.get('label', None)} for e in mrp['edges'] }
+    clf_info, node_types = {}, {}
+    nodes, edges = OrderedDict(), OrderedDict()
+    for n in sorted(mrp['nodes'], key=lambda x: x['id']):
+        nodes[n['id']] = {'lab':n.get('label', None)}
+    for e in sorted(mrp['edges'], key=lambda x: (x['source'], x['target'])):
+        l = e.get('label', None)
+        if 'edge_lab' in fix and l and not l.isupper() and l != 'in':
+            l = None
+        edges[(e['source'], e['target'])] = {'lab':l}
     id = mrp['id']
     debug(print_dict(nodes, pr=False))
     debug(print_dict(edges, pr=False))
@@ -113,7 +130,7 @@ def mrp2clf(mrp, throw_error=False):
         cl = 'b{} DIS b{} b{}'.format(b1, b2, b3)
         clf_info[cl] = ('b', 'DIS', 'b', 'b')
         node_types[b1] = node_types[b2] = node_types[b3] = 'b'
-        edges[(b1, b2)]['done'] = edges[(b2, b3)]['done'] = True 
+        edges[(b1, b2)]['done'] = edges[(b2, b3)]['done'] = True
 
     for (s, t), e in edges.items():
         # Process in-edges
@@ -142,7 +159,7 @@ def mrp2clf(mrp, throw_error=False):
     # at this point they are the only unprocessed nodes
     for i, n in nodes.items():
         if 'done' not in n:
-            b, args = find_binary_pred_condition((i, n), edges, node_types, id=id)
+            b, args = find_binary_pred_condition((i, n), edges, node_types)
             # format differently constant and variable args
             term_args = [ 'x{}'.format(a) if node_types[a] == 'x' else nodes[a]['lab'] \
                             for a in args ]
@@ -152,10 +169,11 @@ def mrp2clf(mrp, throw_error=False):
             if (b, i) in edges: edges[(b, i)]['done'] = True
 
     # check that all nodes and edges were processed
-    undone_nodes = [ n for n in nodes.values() if 'done' not in n ]
-    undone_edges = [ n for n in edges.values() if 'done' not in n ]
+    undone_nodes = { i:n for i, n in nodes.items() if 'done' not in n }
+    undone_edges = { i:n for i, n in edges.items() if 'done' not in n }
     if undone_nodes or undone_edges:
-        error("{}: undone graph fragment: {}".format(id, undone_nodes + undone_edges))
+        error_raise("Undone graph fragment: nodes ({}), edges ({})".format(\
+            undone_nodes, undone_edges))
 
     return clf_info
 
@@ -177,7 +195,7 @@ def write_clfs(clf_infos, meta_list, filename=None):
         OUT.close()
 
 #######################################################################
-################################ Main  ################################
+################################ Main #################################
 if __name__ == '__main__':
     args = parse_arguments()
     sig = clfref.get_signature(args.sig)
@@ -186,26 +204,30 @@ if __name__ == '__main__':
     info("{} mrps read".format(len(mrps)))
     # converting mrps into clfs one-by-one
     error_counter = Counter()
+    drg_count = 0
     clfs_info_list, meta_list, invalids = [], [], []
     for mrp in mrps:
-        if args.ids and mrp['id'] not in args.ids: continue
+        if mrp['framework'] != 'drg' \
+            or args.ids and mrp['id'] not in args.ids: continue
         meta_list.append((mrp['id'], mrp['input']))
+        drg_count += 1
         try:
-            clf = mrp2clf(mrp)
+            clf = mrp2clf(mrp, fix=['edge_lab']) # some graphs need this
             # if signature is
             if args.validate:
                 clfref.check_clf(clf, sig)
             clfs_info_list.append(clf)
         except:
             if args.throw_error: raise
-            error("{}: {}".format(mrp['id'], sys.exc_info()))
-            error_counter.update([sys.exc_info()[1]])
+            err_message = repr(sys.exc_info()[1])
+            if not args.quiet: error("{}: {}".format(mrp['id'], err_message))
+            error_counter.update([re.sub('\d+', 'NUM', err_message)])
             invalids.append(mrp['id'])
-            clfs_info_list.append({'b nevermatching.n.01 x':('b', 'LEX', 'x')})
+            clfs_info_list.append({'b REF x':('b', 'REF', 'x'), 'b nevermatching "n.01" x':('b', 'LEX', 'x')})
     write_clfs(clfs_info_list, meta_list, filename=args.clf)
-    if error_counter:
+    if error_counter and not args.quiet:
         print("Frequencies of erros")
         for err, c in error_counter.most_common():
             print("{:>5}: {}".format(c, err))
-    print("{} ({:.1f}%) mrp conversions failed: {}".format(\
-        len(invalids), len(invalids)/len(mrps)*100, invalids))
+    print("{} ({:.1f}%) mrp conversions out of {} failed: {}".format(\
+        len(invalids), len(invalids)/drg_count*100, drg_count, '' if args.quiet else invalids ))
