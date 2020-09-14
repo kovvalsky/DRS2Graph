@@ -92,27 +92,39 @@ def parse_arguments():
     '--pmb2', action="store_true",
         help="Expect as an input the DRSa formatted in caluses as in the PMB release 2")
     parser.add_argument(
-    '-ce', '--concept-edge', dest='ce', action='store_true',
-        help="Treat concept assertion as a labeled node or labeled edge")
+    '-c', '--concept', default='ln', choices=['ler', 'ln', 'lnr', 'le'],
+        help=("Treat concepts as labeled node (ln), labeled edge (le), "
+              "labeled reified node (lnr), or labeled edge + reified node (ler)"))
+    parser.add_argument(
+    '-in', dest='in_box', default='in', choices=['in', '', 'type'],
+        help="label edge between a box node and a non-box node with 'in', with nothing'', or with 'type' of non-box node (i.e. rol, con, ref)"
+        "for arg1 but not for role and arg2 (if possible), only for role but not for args (if possible)")
     parser.add_argument(
     '-bm', '--box-membership', dest='bm', default='all', choices=['all', 'a1', 'arg1', 'role'],
         help="Show box membership for all nodes, for both role args but not for a role (if possible), "
         "for arg1 but not for role and arg2 (if possible), only for role but not for args (if possible)")
     parser.add_argument(
     '-noarg', '--no-role-arg', dest='noarg', action='store_true',
-        help="Don't use ARG1 and ARG2 labels for the eges spanning between a role node and its arguments")
+        help="Don't use a1 and a2 labels for the eges spanning between a role node and its arguments")
     parser.add_argument(
     '-rmid', '--role-as-midway', dest='rmid', action='store_true',
         help="Whether a role node is a parent or midway for its arguments")
     parser.add_argument(
     '-rle', '--role-as-edge', dest='rle', action='store_true',
         help="Model role predicates as labeled edge")
+    parser.add_argument( # TODO: this is not working yet
+    '-r', '--role', default='lnr', choices=['lnr', 'lnrb', 'ler', 'lei'],
+        help=("Treat roles as labeled reified node (lnr), labeled reifie node between args (lnrb), "
+              "labeled edge + reified node (ler), or labeled edge with indexes for args (lei)"))
 
     # meta and config arguments
     parser.add_argument(
     '--ids', nargs="*", metavar="LIST OF INT",
         help="IDs (i.e., index starting from 0) of the CLFs that will be processed.\
               This works only for the clf file mode.")
+    parser.add_argument(
+    '--enum', action="store_true",
+        help="Ignore original ID and enumerate IDs of CLFs. Useful for sys out without IDs")
     parser.add_argument(
     '--throw-error', action="store_true",
         help="Throw an error instead of counting them")
@@ -132,10 +144,10 @@ def parse_arguments():
     args = parser.parse_args()
     # lossless conversion constraint
     if args.noarg and not args.rmid:
-        raise RuntimeError('Role nodes as top without ARGn labeled egdes is a lossy format')
+        raise RuntimeError('Role nodes as top without aN labeled egdes is a lossy format')
     # visually ad-hoc conversion
     if args.bm in ['arg1', 'a1'] and args.rle\
-    or args.bm == 'role' and args.ce:
+    or args.bm == 'role' and args.concept in ['le', 'len']:
         raise RuntimeError('Role edges with optional role membership edges are incosistent. '
                            'So, are concept edges with optional arg membership edges.')
     # check that at least dir or file input/output mode is active
@@ -165,7 +177,7 @@ def read_mappings(mapping_file):
 
 
 #################################
-def read_clfs(clf_file):
+def read_clfs(clf_file, enum=False):
     '''Read clfs and token alignments from a file and return
        a list of CLFs, where each CLF is a pair of
        a list of clauses (i.e. tuples) and a list of (token, (start_offset, end_offset))
@@ -174,14 +186,15 @@ def read_clfs(clf_file):
     list_of_pd_clf_aligns = []
     clf, alignment = [], []
     # read CLFs where an empty line is a delimiter of CLFs
+    pd = None
     with open(clf_file) as CLFS:
         for i, line in enumerate(CLFS, start=1):
             #print("{}:\t{}".format(i, line))
             # ignore commnet lines unless it contains pXX/dXXXX document ID
             if line.strip().startswith("%"):
-                m = re.search('(p\d{2}/d\d{4})', line)
-                if m:
-                    pd = m.group(1)
+                if not enum:
+                    m = re.search('(p\d{2}/d\d{4})', line)
+                    if m: pd = m.group(1)
                 continue
             # empty line means an end of the running CLF
             if not line.strip():
@@ -189,8 +202,10 @@ def read_clfs(clf_file):
                     assert len(clf) == len(alignment),\
                         "#clauses ({}) is the same as #alignments ({})".format(\
                         len(clf), len(alignment))
+                    # if part/doc is not found use enumeration as IDs
+                    if pd is None: pd = len(list_of_pd_clf_aligns)
                     list_of_pd_clf_aligns.append((pd, clf, alignment))
-                    clf, alignment = [], []
+                    clf, alignment, pd = [], [], None
                 continue
             # get a clause and a token alignment
             try: # when alignmnets are included
@@ -216,6 +231,7 @@ def read_clfs(clf_file):
                 warning('ill-formed clause: {}'.format(clause))
     # add the last clf which has no empty following it
     if clf:
+        if pd is None: pd = len(list_of_pd_clf_aligns)
         list_of_pd_clf_aligns.append((pd, clf, alignment))
     info("{} clfs read".format(len(list_of_pd_clf_aligns)))
     return list_of_pd_clf_aligns
@@ -418,19 +434,40 @@ def add_nodes(nodes, nds, aligns=[]):
         nodes.append(OrderedDict([('id', node_id), ('label', label), ('anchors', al), ('type', type)]))
 
 #################################
+def add_concept(nodes, edges, cl, nid, next_id, aligns, pars={}):
+    '''Augment a graph with a concept, taking into account the conversion mode of concept clauses
+    '''
+    (b, op, x, y) = cl
+    label = "{}.{}".format(op, remove_quotes(x))
+    in_con_lab = 'con' if pars['in'] == 'type' else pars['in']
+    e_lab = label if 'le' in pars['c'] else in_con_lab
+    n_lab = label if 'ln' in pars['c'] else None
+    e_al = [aligns] if 'le' in pars['c'] else []
+    n_al = [aligns] if 'ln' in pars['c'] else []
+    # depending on the reification, concept node can be different from entity node
+    cn_id = next_id if 'r' in pars['c'] else nid[y] # concept node id
+    cn_ty = 'rc' if 'r' in pars['c'] else 'x' # concept node type
+    add_nodes(nodes, [(cn_ty, cn_id, n_lab)], n_al)
+    add_edges(edges, [ (nid[b], cn_id, e_lab) ], e_al)
+    if 'r' in pars['c']:
+        add_nodes(nodes, [('x', nid[y], None)], [])
+        add_edges(edges, [ (cn_id, nid[y], '' if pars['noarg'] else 'a1') ], [])
+
+#################################
 def add_role(nodes, edges, cl, nid, role_id, aligns, pars={}):
     '''Augment a graph with a role, taking into account the conversion mode of role clauses
     '''
     (b, role, e, x) = cl
+    in_lab = 'bin' if pars['in'] == 'type' else pars['in']
     # sanity check
     if pars['noarg'] and not pars['rmid']:
-        raise RuntimeError('Role nodes as top without ARGn labeled egdes is a lossy format')
+        raise RuntimeError('Role nodes as top without aN labeled egdes is a lossy format')
     # role clauses are always reified, and its label depends on the mode
     add_nodes(nodes, [('rr', role_id, None if pars['rle'] else role)], [aligns])
     # label of edge from box to role
-    add_edges(edges, [ (nid[b], role_id, role if pars['rle'] else 'in') ])
+    add_edges(edges, [ (nid[b], role_id, role if pars['rle'] else in_lab) ])
     # arg labels on edges from role to args (if required)
-    (arg1_lab, arg2_lab) = ('', '') if pars['noarg'] else ('ARG1', 'ARG2') #TODO symetric operators
+    (arg1_lab, arg2_lab) = ('', '') if pars['noarg'] else ('a1', 'a2') #TODO symetric operators
     # adding edges depending on a mode
     if pars['rmid']:
     # role node is midway between its args
@@ -504,8 +541,9 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, cl2al, pars={}):
     for x in sorted(box.refs):
         add_nodes(nodes, [('x', nid[x])], [cl2al[b][x]])
         if x not in concept_ref or pars['keep-refs']:
-            # concept refs will be added when processing concept condition, important for -ce flag
-            add_edges(edges, [(nid[b], nid[x], 'in')])
+            # concept refs will be added when processing concept condition, important for -c flag
+            in_ref_lab = 'ref' if pars['in'] == 'type' else pars['in']
+            add_edges(edges, [(nid[b], nid[x], in_ref_lab)])
     for c in sorted(box.conds):
         (op, x, y) = c if len(c) == 3 else (c + (None,))
         # pmb2 version specific operators
@@ -528,10 +566,9 @@ def box2graph(box, nid, nodes, edges, next_id, arg_typing, cl2al, pars={}):
             if hyp_cond: # transfer alignment of general concept to the specific one
                 cl2al[b][hyp_cond] += cl2al[b][c]
             else:
-                label = "{}.{}".format(op, remove_quotes(x))
-                lab = None if pars['ce'] else label
-                add_nodes(nodes, [('x', nid[y], lab)], [cl2al[b][(op, x, y)]])
-                add_edges(edges, [ (nid[b], nid[y], label if pars['ce'] else 'in') ])
+                add_concept(nodes, edges, (b,) + c, nid, next_id, cl2al[b][(op, x, y)], pars=pars)
+                if 'r' in pars['c']:
+                    next_id += 1
         elif op[0].isupper():
             # sanity check: covers roles like "PartOf" and EQU
             assert iter_subseteq_iter([arg_typing[i] for i in (x,y)], "xc")\
@@ -735,8 +772,9 @@ if __name__ == '__main__':
     # read a signature file
     sig = clfref.get_signature(args.sig)
     # conversion parameters
-    con_pars = {'pmb2':args.pmb2, 'keep-refs':args.keep_refs, 'ce':args.ce,
-                'bm':args.bm, 'noarg':args.noarg, 'rmid':args.rmid, 'rle':args.rle,
+    con_pars = {'pmb2':args.pmb2, 'keep-refs':args.keep_refs, 'c':args.concept,
+                'noarg':args.noarg, 'rmid':args.rmid, 'rle':args.rle,
+                'in':args.in_box, 'bm':args.bm,
                 'prov':args.prov }
     # get main mrp graph's meta info
     feats = { k: vars(args)[k] for k in 'frwk mrpv flvr prov'.split() }
@@ -749,7 +787,7 @@ if __name__ == '__main__':
                             con_pars=con_pars, error=args.error)
     # the file I/O mode
     else:
-        list_of_pd_clf_align = read_clfs(args.input)
+        list_of_pd_clf_align = read_clfs(args.input, enum=args.enum)
         with open(args.raw) as r:
             list_of_raw = [ i for i in r.read().split(args.raw_sep) ]
             # if separator is trailing then discard the trailing empty raw
